@@ -6,7 +6,7 @@
 #   Generates queries using dual LLM backends with
 #   checkpointing, cost estimation, and progress tracking.
 #
-#   Simone J. Skeen x Claude Code (06-23-2026)
+#   Simone J. Skeen x Claude Code (09-30-2026)
 #
 # ------------------------------------------------------ #
 
@@ -28,6 +28,8 @@ from config import (
     INPUT_FILES,
     OUTPUT_FILES,
     OUTPUT_DIR,
+    OPENAI_CONFIG,
+    OLLAMA_CONFIG,
 )
 from generation_prompt import build_prompt
 from llm_clients import (
@@ -167,9 +169,9 @@ def save_checkpoint(filepath: Path, completed: set):
         json.dump({'completed': list(completed)}, f)
 
 
-def make_generation_key(persona_id: str, seed_id: str, model: str) -> str:
+def make_generation_key(persona_id: str, seed_id: str, model: str, temperature: float) -> str:
     """Create a unique key for a generation task."""
-    return f"{persona_id}|{seed_id}|{model}"
+    return f"{persona_id}|{seed_id}|{model}|{temperature}"
 
 
 # ------------------------------------------------------ #
@@ -186,6 +188,7 @@ def init_output_file(filepath: Path):
                 'timestamp',
                 'persona_id',
                 'model_sim',
+                'temperature',
                 'seed_id',
                 'generated_query',
                 'token_count',
@@ -202,6 +205,7 @@ def append_result(filepath: Path, result: dict):
             result['timestamp'],
             result['persona_id'],
             result['model_sim'],
+            result['temperature'],
             result['seed_id'],
             result['generated_query'],
             result['token_count'],
@@ -236,19 +240,29 @@ def run_pipeline(dry_run: bool = False, skip_cost_confirm: bool = False):
     print(f"  Loaded {len(seeds)} seed phrases")
     print(f"  Loaded {len(contexts)} persona contexts")
 
-    # Build generation tasks
-    models = ['openai', 'ollama']
+    # Build generation tasks with temperature variation
+    # Each persona/seed/model combo is generated at multiple temperatures
+    temperatures = OPENAI_CONFIG.get('temperatures', [0.7])
     tasks = []
 
     persona_map = {p['persona_id']: p for p in personas}
 
     for seed in seeds:
         persona = persona_map[seed['persona_id']]
-        for model in models:
+        for temp in temperatures:
+            # OpenAI task at this temperature
             tasks.append({
                 'persona': persona,
                 'seed': seed,
-                'model': model,
+                'model': 'openai',
+                'temperature': temp,
+            })
+            # Ollama task at this temperature
+            tasks.append({
+                'persona': persona,
+                'seed': seed,
+                'model': 'ollama',
+                'temperature': temp,
             })
 
     random.shuffle(tasks)
@@ -290,11 +304,13 @@ def run_pipeline(dry_run: bool = False, skip_cost_confirm: bool = False):
         persona = task['persona']
         seed = task['seed']
         model = task['model']
+        temperature = task['temperature']
 
         key = make_generation_key(
             persona['persona_id'],
             seed['seed_id'],
             model,
+            temperature,
         )
 
         if key in completed:
@@ -309,12 +325,12 @@ def run_pipeline(dry_run: bool = False, skip_cost_confirm: bool = False):
             persona_context=persona_context,
         )
 
-        # Generate
+        # Generate with temperature override
         try:
             if model == 'openai':
-                response = get_openai_response(prompt)
+                response = get_openai_response(prompt, {'temperature': temperature})
             else:
-                response = get_ollama_response(prompt)
+                response = get_ollama_response(prompt, {'temperature': temperature})
 
             risk_level = persona.get('current_suicide_risk_level', '')
             suicidal = 0 if risk_level.lower().startswith('no or low risk') else 1
@@ -323,6 +339,7 @@ def run_pipeline(dry_run: bool = False, skip_cost_confirm: bool = False):
                 'timestamp': datetime.now().isoformat(),
                 'persona_id': persona['persona_id'],
                 'model_sim': response['model'],
+                'temperature': temperature,
                 'seed_id': seed['seed_id'],
                 'generated_query': response['text'],
                 'token_count': response['token_count'],
