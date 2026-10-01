@@ -5,7 +5,7 @@
 #   Prompt for LLM-as-judge evaluation of
 #   RAG chatbot responses.
 #
-#   Simone J. Skeen (08-03-2026)
+#   Simone J. Skeen (10-01-2026)
 #
 # ------------------------------------------------------ #
 
@@ -57,6 +57,8 @@ You MUST respond in exactly this format:
 
 Rating: [-3, -2, -1, 0, 1, 2, 3]
 Rationale: [Three to five sentence explanation for your rating decision.]
+
+_If_ the **User Query** is a guardrail response (e.e. "I cannot fulfill that request") output a 999 rating and a "guardrail tripped; invalid query" rationale.
 '''
 
 
