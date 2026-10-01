@@ -214,6 +214,33 @@ def append_result(filepath: Path, result: dict):
         ])
 
 
+def sort_output_file(filepath: Path):
+    """
+    Sort output TSV by persona_id, seed_id, model_sim, temperature.
+    Reads the file, sorts rows, and rewrites in place.
+    """
+    with open(filepath, 'r', newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f, delimiter='\t')
+        rows = list(reader)
+        fieldnames = reader.fieldnames
+
+    if not rows:
+        return
+
+    # Sort: persona_id -> seed_id -> model_sim -> temperature
+    rows.sort(key=lambda r: (
+        r['persona_id'],
+        r['seed_id'],
+        r['model_sim'],
+        float(r['temperature']),
+    ))
+
+    with open(filepath, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter='\t')
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 # ------------------------------------------------------ #
 #   Main Pipeline
 # ------------------------------------------------------ #
@@ -354,6 +381,10 @@ def run_pipeline(dry_run: bool = False, skip_cost_confirm: bool = False):
         except Exception as e:
             print(f"\nError generating {key}: {e}")
             continue
+
+    # Sort output for intuitive inspection
+    print("\nSorting output by persona_id -> seed_id -> model_sim -> temperature...")
+    sort_output_file(output_path)
 
     # Summary
     print(f"\nGeneration complete!")
