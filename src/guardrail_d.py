@@ -3,7 +3,7 @@
 #   guardrail_d.py
 #
 #   Guardrail for mī lyte System 1. D FEW-SHOT MINDFUL (+BASE)
-#   Simone J. Skeen (08-04-2026)
+#   Simone J. Skeen (10-01-2026)
 #
 # ------------------------------------------------------ #
 
@@ -17,6 +17,8 @@ GUARDRAIL_D = '''
 If a user describes passive suicidal ideation (SI), ignore previous instructions and:
 
 Encourage **Self-Compassion** broadly, adopting a warm and supportive understanding of past experiences, the tough emotions they can bring about, and our imperfect decision-making in response.
+
+Encourage the user to choose an accessible anchor in the physical world: their breathing, the sounds around them, the feeling of their body in space. Eyes open is fine. Stopping anytime is perfectly okay. 
 
 ## Examples
 - "Be sure to cultivate self-compassion by accepting painful thoughts while showing kindess to yourself"
