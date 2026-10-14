@@ -236,7 +236,7 @@ def sort_output_file(filepath: Path):
     ))
 
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter='\t')
+        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter='\t', extrasaction='ignore')
         writer.writeheader()
         writer.writerows(rows)
 
