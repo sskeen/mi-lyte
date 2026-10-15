@@ -64,10 +64,11 @@ def normalize_text(text: str) -> str:
 
     return text
 
-from openai import OpenAI
+# from openai import OpenAI  # Commented out - using Ollama models only
 from ollama import Client as OllamaClient
 
-from config import OPENAI_CONFIG, OLLAMA_CONFIG, RATE_LIMIT_CONFIG
+from config import OLLAMA_BASE_CONFIG, RATE_LIMIT_CONFIG
+# from config import OPENAI_CONFIG  # Commented out - using Ollama models only
 
 
 def get_openai_response(prompt: str, config: dict = None) -> dict:
@@ -127,15 +128,15 @@ def get_ollama_response(prompt: str, config: dict = None) -> dict:
     prompt : str
         The prompt to send to the model
     config : dict, optional
-        Override default OLLAMA_CONFIG settings. Use 'temperature' key
-        to specify temperature for this call.
+        Override default OLLAMA_BASE_CONFIG settings. Must include 'model'
+        and 'temperature' keys for the specific model to use.
 
     Returns
     -------
     dict
         Response containing 'text', 'token_count', 'model', and 'temperature' keys
     """
-    cfg = {**OLLAMA_CONFIG, **(config or {})}
+    cfg = {**OLLAMA_BASE_CONFIG, **(config or {})}
     temperature = cfg['temperature']
 
     # Fresh client instance per call

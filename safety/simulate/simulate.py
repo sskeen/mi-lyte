@@ -28,14 +28,15 @@ from config import (
     INPUT_FILES,
     OUTPUT_FILES,
     OUTPUT_DIR,
-    OPENAI_CONFIG,
-    OLLAMA_CONFIG,
+    TEMPERATURES,
+    OLLAMA_MODELS,
+    OLLAMA_BASE_CONFIG,
 )
 from generation_prompt import build_prompt
 from llm_clients import (
-    get_openai_response,
+    # get_openai_response,  # Commented out - using Ollama models only
     get_ollama_response,
-    estimate_openai_cost,
+    # estimate_openai_cost,  # Commented out - using Ollama models only
 )
 
 
@@ -269,47 +270,41 @@ def run_pipeline(dry_run: bool = False, skip_cost_confirm: bool = False):
 
     # Build generation tasks with temperature variation
     # Each persona/seed/model combo is generated at multiple temperatures
-    temperatures = OPENAI_CONFIG.get('temperatures', [0.7])
     tasks = []
 
     persona_map = {p['persona_id']: p for p in personas}
 
     for seed in seeds:
         persona = persona_map[seed['persona_id']]
-        for temp in temperatures:
-            # OpenAI task at this temperature
-            tasks.append({
-                'persona': persona,
-                'seed': seed,
-                'model': 'openai',
-                'temperature': temp,
-            })
-            # Ollama task at this temperature
-            tasks.append({
-                'persona': persona,
-                'seed': seed,
-                'model': 'ollama',
-                'temperature': temp,
-            })
+        for model_config in OLLAMA_MODELS:
+            for temp in TEMPERATURES:
+                tasks.append({
+                    'persona': persona,
+                    'seed': seed,
+                    'model_config': model_config,
+                    'temperature': temp,
+                })
 
     random.shuffle(tasks)
     print(f"  Total generation tasks: {len(tasks)}")
+    print(f"  Models: {[m['name'] for m in OLLAMA_MODELS]}")
+    print(f"  Temperatures: {TEMPERATURES}")
 
-    # Cost estimation for OpenAI calls
-    openai_tasks = len([t for t in tasks if t['model'] == 'openai'])
-    if openai_tasks > 0:
-        cost_estimate = estimate_openai_cost(openai_tasks)
-        print("\nOpenAI Cost Estimate:")
-        print(f"  Generations: {cost_estimate['num_generations']}")
-        print(f"  Est. input tokens: {cost_estimate['total_input_tokens']:,}")
-        print(f"  Est. output tokens: {cost_estimate['total_output_tokens']:,}")
-        print(f"  Est. total cost: ${cost_estimate['total_cost']:.4f}")
-
-        if not skip_cost_confirm and not dry_run:
-            confirm = input("\nProceed with generation? [y/N]: ")
-            if confirm.lower() != 'y':
-                print("Aborted by user.")
-                return
+    # # Cost estimation for OpenAI calls (commented out - using Ollama models only)
+    # openai_tasks = len([t for t in tasks if t['model'] == 'openai'])
+    # if openai_tasks > 0:
+    #     cost_estimate = estimate_openai_cost(openai_tasks)
+    #     print("\nOpenAI Cost Estimate:")
+    #     print(f"  Generations: {cost_estimate['num_generations']}")
+    #     print(f"  Est. input tokens: {cost_estimate['total_input_tokens']:,}")
+    #     print(f"  Est. output tokens: {cost_estimate['total_output_tokens']:,}")
+    #     print(f"  Est. total cost: ${cost_estimate['total_cost']:.4f}")
+    #
+    #     if not skip_cost_confirm and not dry_run:
+    #         confirm = input("\nProceed with generation? [y/N]: ")
+    #         if confirm.lower() != 'y':
+    #             print("Aborted by user.")
+    #             return
 
     if dry_run:
         print("\n[DRY RUN] Validation complete. No LLM calls made.")
@@ -330,13 +325,13 @@ def run_pipeline(dry_run: bool = False, skip_cost_confirm: bool = False):
     for task in tqdm(tasks, desc="Generating queries"):
         persona = task['persona']
         seed = task['seed']
-        model = task['model']
+        model_config = task['model_config']
         temperature = task['temperature']
 
         key = make_generation_key(
             persona['persona_id'],
             seed['seed_id'],
-            model,
+            model_config['name'],
             temperature,
         )
 
@@ -354,10 +349,13 @@ def run_pipeline(dry_run: bool = False, skip_cost_confirm: bool = False):
 
         # Generate with temperature override
         try:
-            if model == 'openai':
-                response = get_openai_response(prompt, {'temperature': temperature})
-            else:
-                response = get_ollama_response(prompt, {'temperature': temperature})
+            # Merge model-specific config with base config and temperature
+            config_override = {
+                **OLLAMA_BASE_CONFIG,
+                **model_config,
+                'temperature': temperature,
+            }
+            response = get_ollama_response(prompt, config_override)
 
             risk_level = persona.get('current_suicide_risk_level', '')
             suicidal = 0 if risk_level.lower().startswith('no or low risk') else 1
