@@ -46,8 +46,8 @@ OLLAMA_MODELS = [
         'think': True,
     },
     {
-        'name': 'deepseek-r1:70b',
-        'model': 'deepseek-r1:70b',
+        'name': 'deepseek-r1:32b',
+        'model': 'deepseek-r1:32b',
         'think': True,
     },
 ]
