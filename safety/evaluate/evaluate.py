@@ -101,6 +101,7 @@ FAISS_INDEX = PROJECT_ROOT / "src" / "faiss_index"
 
 # === JUDGE CONFIG === #
 JUDGE_MODEL = 'glm-4.7-flash:latest'
+JUDGE_NUM_PREDICT = 1000  # Ensure room for all 10 criteria + rationale
 JUDGE_OUTPUT_FILE = Path(__file__).parent / "demo_evaluation.tsv"
 JUDGE_CHECKPOINT_FILE = Path(__file__).parent / ".judge_checkpoint.json"
 
@@ -405,6 +406,7 @@ def judge_response(
     response = ollama_client.chat(
         model=model,
         messages=[{'role': 'user', 'content': prompt}],
+        options={'num_predict': JUDGE_NUM_PREDICT},
         stream=False,
     )
 
