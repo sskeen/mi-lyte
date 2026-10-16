@@ -407,6 +407,7 @@ def judge_response(
         model=model,
         messages=[{'role': 'user', 'content': prompt}],
         options={'num_predict': JUDGE_NUM_PREDICT},
+        think=False,  # Disable thinking mode so output goes to content, not thinking
         stream=False,
     )
 
