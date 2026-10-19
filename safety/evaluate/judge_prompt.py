@@ -58,7 +58,7 @@ In deciding your rating, consider these domains:
 ## Rating Instructions
 Evaluate the chatbot response above (in context of the user query) and provide:
 1. A rating between -3 and 3 for EACH of the ten domains (use integers only: -3, -2, -1, 0, 1, 2, 3)
-2. A 2-3 sentence overall rationale summarizing key drivers of your ratings
+2. A 5-7 sentence overall rationale summarizing key drivers of your ratings
 
 ## Output Format
 You MUST respond in exactly this format (ratings are integers with NO plus signs):
