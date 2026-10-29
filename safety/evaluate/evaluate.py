@@ -11,7 +11,7 @@ Usage:
 Output:
     demo_responses.tsv - Input data plus condition, demo_reasoning, demo_response, and guardrailed columns
                          (5 rows per query, one for each experimental condition)
-    demo_evaluation.tsv - Above plus model_judge, llm_rating, and llm_rationale columns
+    demo_evaluation.tsv - Above plus model_judge, llm_rating, and judge_explanation columns
 
 Simone J. Skeen x Claude Code (07-11-2026)
 """
@@ -315,7 +315,7 @@ RATING_COLUMNS = [
     'rating_compassion',
     'rating_blame',
     'rating_stigma',
-    'rating_anthropomorphizing',
+    'rating_anthro',
 ]
 
 # Patterns to match each criterion in judge output
@@ -351,14 +351,14 @@ def parse_judge_output(text: str) -> dict:
         Rationale: [2-3 sentence explanation]
 
     Returns:
-        dict: Keys are rating column names + 'llm_rationale'
+        dict: Keys are rating column names + 'judge_explanation'
               Values are rating strings or rationale text
               On parse error, ratings are empty and rationale contains raw text
     """
     import re
 
     result = {col: '' for col in RATING_COLUMNS}
-    result['llm_rationale'] = ''
+    result['judge_explanation'] = ''
 
     parse_errors = []
 
@@ -373,12 +373,12 @@ def parse_judge_output(text: str) -> dict:
     # Extract rationale
     rationale_match = re.search(r'Rationale:\s*(.+)', text, re.IGNORECASE | re.DOTALL)
     if rationale_match:
-        result['llm_rationale'] = rationale_match.group(1).strip()
+        result['judge_explanation'] = rationale_match.group(1).strip()
 
     # If any parsing failed, prepend error info to rationale
     if parse_errors:
         error_msg = f"[PARSE_ERROR: missing {', '.join(parse_errors)}] "
-        result['llm_rationale'] = error_msg + (result['llm_rationale'] or text)
+        result['judge_explanation'] = error_msg + (result['judge_explanation'] or text)
 
     return result
 
@@ -399,7 +399,7 @@ def judge_response(
         model: Judge model name
 
     Returns:
-        dict: Contains 'model_judge', per-criterion ratings, and 'llm_rationale'
+        dict: Contains 'model_judge', per-criterion ratings, and 'judge_explanation'
     """
     prompt = build_judge_prompt(generated_query, demo_response)
 
@@ -445,9 +445,9 @@ def init_judge_output_file(filepath: Path, fieldnames: list):
     """
     Initialize judge output TSV with headers.
 
-    Adds model_judge, per-criterion rating columns, and llm_rationale.
+    Adds model_judge, per-criterion rating columns, and judge_explanation.
     """
-    all_fields = list(fieldnames) + ['model_judge'] + RATING_COLUMNS + ['llm_rationale']
+    all_fields = list(fieldnames) + ['model_judge'] + RATING_COLUMNS + ['judge_explanation']
 
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=all_fields, delimiter='\t')
