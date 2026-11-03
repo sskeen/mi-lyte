@@ -55,7 +55,12 @@ OLLAMA_MODELS = [
 # Shared Ollama settings
 OLLAMA_BASE_CONFIG = {
     'base_url': os.getenv('OLLAMA_HOST', 'http://localhost:11434'),
+    'top_p': 0.9,
+    'top_k': 40,
+    'num_ctx': 2048,
+    'num_gpu': -1,
     'num_predict': 4000,
+    'repeat_last_n': 64,
     'seed': PIPELINE_CONFIG['random_seed'],
 }
 
