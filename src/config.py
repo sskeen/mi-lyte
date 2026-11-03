@@ -45,7 +45,7 @@ OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
 # 'qwen2.5:32b'
 
 LLM_PARAMS = {
-    'model': 'deepseek-r1:14b', 
+    'model': 'deepseek-r1:14b',
     'base_url': OLLAMA_HOST,
     'temperature': 0.6,
     'top_p': 0.9,
@@ -55,6 +55,7 @@ LLM_PARAMS = {
     'num_predict': 768,
     'repeat_last_n': 64,
     'stop': None,
+    'seed': 56,
 }
 
 # === EMBEDDING HOST === #
