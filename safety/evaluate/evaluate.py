@@ -11,7 +11,8 @@ Usage:
 Output:
     demo_responses.tsv - Input data plus condition, demo_reasoning, demo_response, and guardrailed columns
                          (5 rows per query, one for each experimental condition)
-    demo_evaluation.tsv - Above plus model_judge, llm_rating, and judge_explanation columns
+    demo_evaluation.tsv - Summary with mean/SD for each rating criterion across k judge runs
+    demo_evaluation_runs.tsv - Individual ratings from each of k judge runs
 
 Simone J. Skeen x Claude Code (07-11-2026)
 """
@@ -22,6 +23,7 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime
+from statistics import mean, stdev
 
 # === FIX OPENMP CONFLICT ON MACOS === #
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
@@ -101,6 +103,7 @@ FAISS_INDEX = PROJECT_ROOT / "src" / "faiss_index"
 
 # === JUDGE CONFIG === #
 JUDGE_MODEL = 'glm-4.7-flash:latest'
+JUDGE_K_RUNS = 5  # Number of judge evaluations per response (for CV estimates)
 JUDGE_PARAMS = {
     'temperature': 0.6,
     'top_p': 0.9,
@@ -111,7 +114,8 @@ JUDGE_PARAMS = {
     'repeat_last_n': 64,
     #'seed': 56, ### NOTE 11/3: disabling reproducability to favor CV + spread estimates
 }
-JUDGE_OUTPUT_FILE = Path(__file__).parent / "demo_evaluation.tsv"
+JUDGE_OUTPUT_FILE = Path(__file__).parent / "demo_evaluation.tsv"  # Mean/SD summary
+JUDGE_RUNS_FILE = Path(__file__).parent / "demo_evaluation_runs.tsv"  # Individual k runs
 JUDGE_CHECKPOINT_FILE = Path(__file__).parent / ".judge_checkpoint.json"
 
 
@@ -342,6 +346,34 @@ RATING_PATTERNS = [
 ]
 
 
+def get_run_columns(k: int) -> list[str]:
+    """
+    Generate column names for individual run data.
+
+    Returns columns like: rating_detection_1, rating_detection_2, ...,
+    judge_explanation_1, judge_explanation_2, ...
+    """
+    cols = []
+    for run in range(1, k + 1):
+        for rating_col in RATING_COLUMNS:
+            cols.append(f"{rating_col}_{run}")
+        cols.append(f"judge_explanation_{run}")
+    return cols
+
+
+def get_summary_columns() -> list[str]:
+    """
+    Generate column names for mean/SD summary data.
+
+    Returns columns like: rating_detection_mean, rating_detection_sd, ...
+    """
+    cols = []
+    for rating_col in RATING_COLUMNS:
+        cols.append(f"{rating_col}_mean")
+        cols.append(f"{rating_col}_sd")
+    return cols
+
+
 def parse_judge_output(text: str) -> dict:
     """
     Parse judge LLM output into per-criterion ratings and rationale.
@@ -450,13 +482,26 @@ def save_judge_checkpoint(completed: set):
 #   JUDGE OUTPUT WRITING
 # ------------------------------------------------------ #
 
-def init_judge_output_file(filepath: Path, fieldnames: list):
+def init_judge_summary_file(filepath: Path, fieldnames: list):
     """
-    Initialize judge output TSV with headers.
+    Initialize judge summary TSV (demo_evaluation.tsv) with headers.
 
-    Adds model_judge, per-criterion rating columns, and judge_explanation.
+    Adds model_judge and mean/SD columns for each rating criterion.
     """
-    all_fields = list(fieldnames) + ['model_judge'] + RATING_COLUMNS + ['judge_explanation']
+    all_fields = list(fieldnames) + ['model_judge'] + get_summary_columns()
+
+    with open(filepath, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=all_fields, delimiter='\t')
+        writer.writeheader()
+
+
+def init_judge_runs_file(filepath: Path, fieldnames: list):
+    """
+    Initialize judge runs TSV (demo_evaluation_runs.tsv) with headers.
+
+    Adds model_judge and per-run columns for each rating criterion + explanation.
+    """
+    all_fields = list(fieldnames) + ['model_judge'] + get_run_columns(JUDGE_K_RUNS)
 
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=all_fields, delimiter='\t')
@@ -464,7 +509,7 @@ def init_judge_output_file(filepath: Path, fieldnames: list):
 
 
 def append_judge_result(filepath: Path, row: dict):
-    """Append a single judge evaluation result to the output TSV."""
+    """Append a single judge evaluation result to an output TSV."""
     with open(filepath, 'r', newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f, delimiter='\t')
         fieldnames = reader.fieldnames
@@ -474,16 +519,98 @@ def append_judge_result(filepath: Path, row: dict):
         writer.writerow(row)
 
 
+def compute_rating_stats(run_results: list[dict]) -> dict:
+    """
+    Compute mean and SD for each rating across k runs.
+
+    Parameters:
+        run_results: List of k judge result dicts, each with RATING_COLUMNS keys
+
+    Returns:
+        dict: Keys like 'rating_detection_mean', 'rating_detection_sd', etc.
+              Non-numeric values (999, '.', parse errors) are excluded from stats.
+              If no valid values, returns '.' for both mean and sd.
+    """
+    stats = {}
+
+    for rating_col in RATING_COLUMNS:
+        values = []
+        for result in run_results:
+            raw = result.get(rating_col, '')
+            # Only include valid numeric ratings (-3 to 3)
+            try:
+                val = int(raw)
+                if -3 <= val <= 3:
+                    values.append(val)
+            except (ValueError, TypeError):
+                continue
+
+        if len(values) >= 2:
+            stats[f"{rating_col}_mean"] = f"{mean(values):.2f}"
+            stats[f"{rating_col}_sd"] = f"{stdev(values):.2f}"
+        elif len(values) == 1:
+            stats[f"{rating_col}_mean"] = f"{values[0]:.2f}"
+            stats[f"{rating_col}_sd"] = '.'
+        else:
+            stats[f"{rating_col}_mean"] = '.'
+            stats[f"{rating_col}_sd"] = '.'
+
+    return stats
+
+
+def build_runs_row(base_row: dict, run_results: list[dict], model: str) -> dict:
+    """
+    Build a row for the runs file from k judge results.
+
+    Parameters:
+        base_row: Original row data (from demo_responses)
+        run_results: List of k judge result dicts
+        model: Judge model name
+
+    Returns:
+        dict: Row with all run-specific columns (rating_detection_1, etc.)
+    """
+    row = dict(base_row)
+    row['model_judge'] = model
+
+    for run_idx, result in enumerate(run_results, start=1):
+        for rating_col in RATING_COLUMNS:
+            row[f"{rating_col}_{run_idx}"] = result.get(rating_col, '')
+        row[f"judge_explanation_{run_idx}"] = result.get('judge_explanation', '')
+
+    return row
+
+
+def build_summary_row(base_row: dict, run_results: list[dict], model: str) -> dict:
+    """
+    Build a row for the summary file with mean/SD stats.
+
+    Parameters:
+        base_row: Original row data (from demo_responses)
+        run_results: List of k judge result dicts
+        model: Judge model name
+
+    Returns:
+        dict: Row with mean/SD columns for each rating
+    """
+    row = dict(base_row)
+    row['model_judge'] = model
+    row.update(compute_rating_stats(run_results))
+    return row
+
+
 # ------------------------------------------------------ #
 #   JUDGE LOOP
 # ------------------------------------------------------ #
 
 def run_judge_evaluation(ollama_client):
     """
-    Run LLM-as-judge evaluation on demo responses.
+    Run LLM-as-judge evaluation on demo responses with k runs per response.
 
-    Reads demo_responses.tsv and evaluates each row,
-    outputting to demo_evaluation.tsv with rating and rationale.
+    Runs the judge JUDGE_K_RUNS times per response to capture scoring variability.
+    Outputs:
+        - demo_evaluation.tsv: Mean/SD summary for each rating criterion
+        - demo_evaluation_runs.tsv: Individual scores from each of k runs
     """
     print("\n" + "=" * 60)
     print("LLM-as-Judge Evaluation")
@@ -500,20 +627,27 @@ def run_judge_evaluation(ollama_client):
     responses = load_queries(OUTPUT_FILE)
     print(f"Loaded {len(responses)} responses to evaluate")
     print(f"Judge model: {JUDGE_MODEL} @ {OLLAMA_HOST}")
+    print(f"Runs per response: {JUDGE_K_RUNS}")
 
     # Load checkpoint
     completed = load_judge_checkpoint()
     if completed:
         print(f"\nResuming from checkpoint: {len(completed)} already completed")
 
-    # Initialize output file with headers if it doesn't exist
+    # Initialize output files with headers if they don't exist
     if not JUDGE_OUTPUT_FILE.exists():
         fieldnames = list(responses[0].keys())
-        init_judge_output_file(JUDGE_OUTPUT_FILE, fieldnames)
-        print(f"\nCreated output file: {JUDGE_OUTPUT_FILE}")
+        init_judge_summary_file(JUDGE_OUTPUT_FILE, fieldnames)
+        print(f"\nCreated summary file: {JUDGE_OUTPUT_FILE}")
+
+    if not JUDGE_RUNS_FILE.exists():
+        fieldnames = list(responses[0].keys())
+        init_judge_runs_file(JUDGE_RUNS_FILE, fieldnames)
+        print(f"Created runs file: {JUDGE_RUNS_FILE}")
 
     # Process responses
-    print(f"\nEvaluating {len(responses)} responses...\n")
+    total_calls = len(responses) * JUDGE_K_RUNS
+    print(f"\nEvaluating {len(responses)} responses × {JUDGE_K_RUNS} runs = {total_calls} judge calls...\n")
     start_time = datetime.now()
 
     for i, row in enumerate(responses):
@@ -529,13 +663,17 @@ def run_judge_evaluation(ollama_client):
         if row.get('guardrailed') == '1':
             print(f"[{i+1}/{len(responses)}] {persona_id}/{seed_id} C{condition}...", end=' ', flush=True)
 
-            # Fill rating columns and explanation with "."
-            judge_result = {col: '.' for col in RATING_COLUMNS}
-            judge_result['judge_explanation'] = '.'
-            judge_result['model_judge'] = '.'
+            # Build placeholder results for k runs (all ".")
+            placeholder_result = {col: '.' for col in RATING_COLUMNS}
+            placeholder_result['judge_explanation'] = '.'
+            run_results = [placeholder_result] * JUDGE_K_RUNS
 
-            row.update(judge_result)
-            append_judge_result(JUDGE_OUTPUT_FILE, row)
+            # Build and append rows for both files
+            runs_row = build_runs_row(row, run_results, '.')
+            summary_row = build_summary_row(row, run_results, '.')
+
+            append_judge_result(JUDGE_RUNS_FILE, runs_row)
+            append_judge_result(JUDGE_OUTPUT_FILE, summary_row)
 
             completed.add(i)
             save_judge_checkpoint(completed)
@@ -546,28 +684,34 @@ def run_judge_evaluation(ollama_client):
         print(f"[{i+1}/{len(responses)}] Judging {persona_id}/{seed_id} C{condition}...", end=' ', flush=True)
 
         query_start = datetime.now()
+        run_results = []
 
         try:
-            judge_result = judge_response(
-                row['generated_query'],
-                row['demo_response'],
-                ollama_client,
-            )
+            # Run judge k times
+            for k in range(JUDGE_K_RUNS):
+                result = judge_response(
+                    row['generated_query'],
+                    row['demo_response'],
+                    ollama_client,
+                )
+                run_results.append(result)
+                print(f"k{k+1}", end=' ', flush=True)
 
-            # Add judge columns to row
-            row.update(judge_result)
+            # Build and append rows for both files
+            runs_row = build_runs_row(row, run_results, JUDGE_MODEL)
+            summary_row = build_summary_row(row, run_results, JUDGE_MODEL)
 
-            # Append to output
-            append_judge_result(JUDGE_OUTPUT_FILE, row)
+            append_judge_result(JUDGE_RUNS_FILE, runs_row)
+            append_judge_result(JUDGE_OUTPUT_FILE, summary_row)
 
             # Update checkpoint
             completed.add(i)
             save_judge_checkpoint(completed)
 
             elapsed = (datetime.now() - query_start).total_seconds()
-            # Show first non-empty rating as summary
-            sample_rating = judge_result.get('rating_detection', '?')
-            print(f"done - detection: {sample_rating} ({elapsed:.1f}s)")
+            # Show mean detection rating as summary
+            mean_detection = summary_row.get('rating_detection_mean', '?')
+            print(f"done - detection_mean: {mean_detection} ({elapsed:.1f}s)")
 
         except Exception as e:
             print(f"ERROR: {e}")
@@ -578,7 +722,8 @@ def run_judge_evaluation(ollama_client):
     print(f"\n{'=' * 60}")
     print(f"Completed {len(completed)}/{len(responses)} judge evaluations")
     print(f"Total time: {total_time:.1f}s ({total_time/60:.1f} minutes)")
-    print(f"Output: {JUDGE_OUTPUT_FILE}")
+    print(f"Summary output: {JUDGE_OUTPUT_FILE}")
+    print(f"Runs output: {JUDGE_RUNS_FILE}")
     print("=" * 60)
 
 
