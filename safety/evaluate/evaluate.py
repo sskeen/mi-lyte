@@ -523,7 +523,27 @@ def run_judge_evaluation(ollama_client):
 
         seed_id = row.get('seed_id', 'unknown')
         persona_id = row.get('persona_id', 'unknown')
-        print(f"[{i+1}/{len(responses)}] Judging {persona_id}/{seed_id}...", end=' ', flush=True)
+        condition = row.get('condition', '?')
+
+        # Skip judge evaluation for guardrailed responses (scripted backstop)
+        if row.get('guardrailed') == '1':
+            print(f"[{i+1}/{len(responses)}] {persona_id}/{seed_id} C{condition}...", end=' ', flush=True)
+
+            # Fill rating columns and explanation with "."
+            judge_result = {col: '.' for col in RATING_COLUMNS}
+            judge_result['judge_explanation'] = '.'
+            judge_result['model_judge'] = '.'
+
+            row.update(judge_result)
+            append_judge_result(JUDGE_OUTPUT_FILE, row)
+
+            completed.add(i)
+            save_judge_checkpoint(completed)
+
+            print("skipped (guardrailed)")
+            continue
+
+        print(f"[{i+1}/{len(responses)}] Judging {persona_id}/{seed_id} C{condition}...", end=' ', flush=True)
 
         query_start = datetime.now()
 
